@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'category_manager.dart';
 import 'task_art.dart';
 import 'preset_editor.dart';
+import 'ringtone_settings.dart';
 import 'theme.dart';
 import 'timer_controller.dart';
 import 'timer_models.dart';
@@ -408,11 +409,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: const Icon(Icons.timer_outlined, color: Colors.white, size: 25),
       ),
       const SizedBox(width: 11),
-      const Expanded(
+      Expanded(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '计时管理',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
@@ -420,7 +421,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 letterSpacing: 1,
               ),
             ),
-            Text(
+            const Text(
               'TIMER MANAGER',
               style: TextStyle(
                 fontSize: 9,
@@ -428,21 +429,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 color: TimerColors.muted,
               ),
             ),
+            if (controller.runningCount > 0)
+              Text(
+                '${controller.runningCount} 个进行中',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
           ],
         ),
       ),
-      if (controller.runningCount > 0)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE5EBE2),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            '${controller.runningCount} 个进行中',
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-          ),
-        ),
+      IconButton(
+        key: const ValueKey('ringtone-settings'),
+        onPressed: () => showRingtoneSettings(context, controller.platform),
+        tooltip: '计时结束铃声',
+        icon: const Icon(Icons.music_note_rounded, size: 22),
+        color: TimerColors.muted,
+      ),
       IconButton(
         onPressed: _help,
         tooltip: '使用说明',

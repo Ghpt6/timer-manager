@@ -13,6 +13,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -133,22 +134,14 @@ class TimerRingingService : Service() {
         }
         check(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "Alarm audio focus denied" }
         hasAudioFocus = true
-        // Bundle a sound so an unset/unreadable OEM default ringtone cannot
-        // produce a silent timer. Alarm volume and Do Not Disturb still apply.
-        val sound = MediaPlayer()
-        player = sound
-        sound.setAudioAttributes(attributes)
-        sound.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
-        resources.openRawResourceFd(R.raw.timer_alarm).use { asset ->
-            sound.setDataSource(asset.fileDescriptor, asset.startOffset, asset.length)
+        val selected = TimerRingtoneSettings.selectedUri(this)
+        try {
+            playSound(selected)
+        } catch (error: Exception) {
+            if (selected == null) throw error
+            Log.w("KitchenTimer", "Selected ringtone unavailable; using bundled alarm", error)
+            playSound(null)
         }
-        sound.isLooping = true
-        sound.setOnErrorListener { _, _, _ ->
-            finishRinging()
-            true
-        }
-        sound.prepare()
-        sound.start()
         val vibrate = if (Build.VERSION.SDK_INT >= 26)
             getSystemService(NotificationManager::class.java)
                 .getNotificationChannel(TimerAlarms.CHANNEL_ID)?.shouldVibrate() ?: true else true
@@ -157,6 +150,30 @@ class TimerRingingService : Service() {
             if (Build.VERSION.SDK_INT >= 26) vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0), attributes)
             else vibrator.vibrate(pattern, 0, attributes)
         }
+    }
+
+    private fun playSound(uri: Uri?) {
+        player?.release()
+        val sound = MediaPlayer()
+        player = sound
+        sound.setAudioAttributes(attributes)
+        sound.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
+        if (uri == null) {
+            resources.openRawResourceFd(R.raw.timer_alarm).use { asset ->
+                sound.setDataSource(asset.fileDescriptor, asset.startOffset, asset.length)
+            }
+        } else {
+            sound.setDataSource(this, uri)
+        }
+        sound.isLooping = true
+        sound.setOnErrorListener { _, _, _ ->
+            if (uri != null) {
+                try { playSound(null) } catch (_: Exception) { finishRinging() }
+            } else finishRinging()
+            true
+        }
+        sound.prepare()
+        sound.start()
     }
 
     private fun updateRinging() {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutterproject/main.dart';
 import 'package:flutterproject/src/timer_controller.dart';
 import 'package:flutterproject/src/timer_models.dart';
+import 'package:flutterproject/src/timer_platform.dart';
 
 import 'support/fake_timer_platform.dart';
 
@@ -26,6 +28,99 @@ void main() {
     await tester.pumpAndSettle();
     return controller;
   }
+
+  testWidgets(
+    'global ringtone selection, cancel, reopen and reset preserve timers',
+    (tester) async {
+      final controller = await launch(tester);
+      final platform = controller.platform as FakeTimerPlatform;
+      controller.start(controller.presets.first);
+      await controller.saved;
+      final timer = controller.timers.single;
+      final state = platform.state;
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ringtone-settings')));
+      await tester.pumpAndSettle();
+      expect(find.text('内置铃声'), findsOneWidget);
+      platform.nextRingtone = const TimerRingtone(
+        title: '清晨鸟鸣',
+        uri: 'content://media/internal/audio/media/12',
+      );
+      await tester.tap(find.byKey(const ValueKey('pick-ringtone')));
+      await tester.pumpAndSettle();
+      expect(find.text('清晨鸟鸣'), findsOneWidget);
+      platform.nextRingtone = null;
+      await tester.tap(find.byKey(const ValueKey('pick-ringtone')));
+      await tester.pumpAndSettle();
+      expect(find.text('清晨鸟鸣'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('close-ringtone-settings')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ringtone-settings')));
+      await tester.pumpAndSettle();
+      expect(find.text('清晨鸟鸣'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('reset-ringtone')));
+      await tester.pumpAndSettle();
+      expect(find.text('内置铃声'), findsOneWidget);
+      expect(controller.timers.single, same(timer));
+      expect(platform.state, state);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('ringtone errors are visible and can be retried', (tester) async {
+    final controller = await launch(tester);
+    final platform = controller.platform as FakeTimerPlatform;
+    platform.ringtoneError = PlatformException(code: 'READ', message: '无法读取铃声');
+    await tester.tap(find.byKey(const ValueKey('ringtone-settings')));
+    await tester.pumpAndSettle();
+    expect(find.text('无法读取铃声'), findsOneWidget);
+    platform.ringtoneError = null;
+    await tester.tap(find.text('重新读取'));
+    await tester.pumpAndSettle();
+    expect(find.text('内置铃声'), findsOneWidget);
+    platform.ringtoneError = PlatformException(
+      code: 'RINGTONE_UNAVAILABLE',
+      message: '此手机未提供系统铃声选择器',
+    );
+    await tester.tap(find.byKey(const ValueKey('pick-ringtone')));
+    await tester.pumpAndSettle();
+    expect(find.text('此手机未提供系统铃声选择器'), findsOneWidget);
+    expect(find.text('内置铃声'), findsOneWidget);
+    platform.ringtoneError = null;
+    platform.nextRingtone = const TimerRingtone(
+      title: '系统默认闹钟铃声',
+      uri: 'content://settings/system/alarm_alert',
+    );
+    await tester.tap(find.byKey(const ValueKey('pick-ringtone')));
+    await tester.pumpAndSettle();
+    expect(find.text('系统默认闹钟铃声'), findsOneWidget);
+    expect(find.text('此手机未提供系统铃声选择器'), findsNothing);
+  });
+
+  testWidgets(
+    'ringtone settings fit 320px and double text size with a long title',
+    (tester) async {
+      final controller = await launch(
+        tester,
+        size: const Size(320, 640),
+        scale: 2,
+      );
+      final platform = controller.platform as FakeTimerPlatform;
+      platform.ringtone = const TimerRingtone(
+        title: '清晨森林中悠扬的鸟鸣和流水声（手机系统自带铃声）',
+        uri: 'content://media/internal/audio/media/12',
+      );
+      await tester.tap(find.byKey(const ValueKey('ringtone-settings')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final reset = find.byKey(const ValueKey('reset-ringtone'));
+      await tester.ensureVisible(reset);
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      expect(platform.ringtone.isBuiltIn, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('one tap starts, pause resume reset and cancel work', (
     tester,

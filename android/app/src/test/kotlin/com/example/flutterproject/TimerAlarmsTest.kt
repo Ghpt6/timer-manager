@@ -1,10 +1,15 @@
 package com.example.flutterproject
 
 import android.app.Application
+import android.app.Activity
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Looper
 import android.provider.Settings
 import org.json.JSONArray
@@ -21,6 +26,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import org.robolectric.shadows.ShadowAlarmManager
 import org.robolectric.shadows.ShadowMediaPlayer
+import org.robolectric.shadows.util.DataSource
+import java.io.IOException
 import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
@@ -78,6 +85,9 @@ class TimerAlarmsTest {
     }
 
     @Test fun `a silent channel keeps its settings and offers the correct settings screen`() {
+        TimerRingtoneSettings.acceptResult(context, Activity.RESULT_OK,
+            Intent().putExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI,
+                Uri.parse("content://media/internal/audio/media/12")))
         val channel = manager.getNotificationChannel(TimerAlarms.CHANNEL_ID)
         // Robolectric exposes the stored channel, modeling a system-settings edit.
         channel.setSound(null, null)
@@ -159,6 +169,74 @@ class TimerAlarmsTest {
             TimerAlarms.saveState(context, state(timer(deadline = 0, status = "paused")))
             assertTrue(shadowOf(service.get()).isStoppedBySelf)
             assertNull(shadowOf(manager).getNotification(1))
+        } finally { service.destroy() }
+    }
+
+    @Test fun `completion uses saved ringtone with alarm audio and changing preference keeps current playback`() {
+        val uri = Uri.parse("content://media/internal/audio/media/12")
+        TimerRingtoneSettings.acceptResult(context, Activity.RESULT_OK,
+            Intent().putExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, uri))
+        val players = mutableListOf<MediaPlayer>()
+        ShadowMediaPlayer.setCreateListener { player, _ -> players.add(player) }
+        val completed = timer()
+        TimerAlarms.saveState(context, state(completed))
+        val service = Robolectric.buildService(TimerRingingService::class.java).create()
+        try {
+            service.get().onStartCommand(serviceIntent(completed), 0, 1)
+            val player = players.single()
+            assertEquals(DataSource.toDataSource(context, uri), shadowOf(player).dataSource)
+            assertEquals(AudioAttributes.USAGE_ALARM, shadowOf(player).audioAttributes.usage)
+            assertTrue(player.isLooping)
+            assertTrue(player.isPlaying)
+            TimerRingtoneSettings.reset(context)
+            assertTrue(player.isPlaying)
+            assertEquals(1, players.size)
+            TimerAlarms.saveState(context, state())
+            assertEquals(ShadowMediaPlayer.State.END, shadowOf(player).state)
+        } finally { service.destroy() }
+    }
+
+    @Test fun `unreadable selected ringtone falls back and still stops after fifteen seconds`() {
+        val uri = Uri.parse("content://media/internal/audio/media/404")
+        TimerRingtoneSettings.acceptResult(context, Activity.RESULT_OK,
+            Intent().putExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, uri))
+        ShadowMediaPlayer.addException(DataSource.toDataSource(context, uri), IOException("Deleted ringtone"))
+        val players = mutableListOf<MediaPlayer>()
+        ShadowMediaPlayer.setCreateListener { player, _ -> players.add(player) }
+        val completed = timer()
+        TimerAlarms.saveState(context, state(completed))
+        val service = Robolectric.buildService(TimerRingingService::class.java).create()
+        try {
+            service.get().onStartCommand(serviceIntent(completed), 0, 1)
+            assertEquals(2, players.size)
+            assertEquals(ShadowMediaPlayer.State.END, shadowOf(players.first()).state)
+            assertTrue(players.last().isPlaying)
+            assertNotEquals(DataSource.toDataSource(context, uri), shadowOf(players.last()).dataSource)
+            assertEquals(uri, TimerRingtoneSettings.selectedUri(context))
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(15))
+            assertEquals(ShadowMediaPlayer.State.END, shadowOf(players.last()).state)
+            assertTrue(shadowOf(service.get()).isStoppedBySelf)
+        } finally { service.destroy() }
+    }
+
+    @Test fun `decoder error falls back without extending ringing deadline`() {
+        val uri = Uri.parse("content://media/internal/audio/media/12")
+        TimerRingtoneSettings.acceptResult(context, Activity.RESULT_OK,
+            Intent().putExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, uri))
+        val players = mutableListOf<MediaPlayer>()
+        ShadowMediaPlayer.setCreateListener { player, _ -> players.add(player) }
+        val completed = timer()
+        TimerAlarms.saveState(context, state(completed))
+        val service = Robolectric.buildService(TimerRingingService::class.java).create()
+        try {
+            service.get().onStartCommand(serviceIntent(completed), 0, 1)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(10))
+            shadowOf(players.single()).invokeErrorListener(MediaPlayer.MEDIA_ERROR_UNKNOWN, 0)
+            assertEquals(2, players.size)
+            assertTrue(players.last().isPlaying)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(5))
+            assertEquals(ShadowMediaPlayer.State.END, shadowOf(players.last()).state)
+            assertTrue(shadowOf(service.get()).isStoppedBySelf)
         } finally { service.destroy() }
     }
 }

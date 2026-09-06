@@ -32,7 +32,8 @@
 - 首次打开即串行保存初始状态，用本地状态是否存在区分首次访问；欢迎卡片只在首次访问中显示，开始任务后隐藏。已有 version 1/2 用户不再显示欢迎卡片。
 - `kitchen_timer/platform`、SharedPreferences 的 `kitchen_timer`/`kitchen_timer_permissions`、通知 channel `kitchen_timer_finished` 是兼容性标识。不要因产品改名而直接改动，否则可能丢失已有数据或通知设置。
 - Android 从 `timers` 读取任务 ID、名称、status 和 deadline，保存状态也同步系统闹钟。暂停/重置/取消需要撤销相应闹钟，完成通知按本次 deadline 去重。
-- `TimerRingingService` 用闹钟音量播放内置铃声，每次完成最多 15 秒；多个计时共享播放器。重置/取消/完成必须停止对应 deadline 的响铃，编辑/删除任务或分类不影响活动响铃。保留用户通知静音设置；重启接收器不得直接启动媒体播放服务。
+- 全局结束铃声通过 `TimerRingtoneSettings` 调用系统铃声选择器，独立保存到原 SharedPreferences 的 `ringtone_uri` / `ringtone_title`，不写入任务 JSON。缺省为内置铃声，系统默认项保留动态 URI；取消选择不改设置。不能改动手机默认铃声或已有通知频道。
+- `TimerRingingService` 用闹钟音量播放所选铃声，读取或解码失败回退到内置铃声，每次完成最多 15 秒；多个计时共享播放器。设置更改不切换当前播放器。重置/取消/完成必须停止对应 deadline 的响铃，编辑/删除任务或分类不影响活动响铃。保留用户通知静音设置；重启接收器不得直接启动媒体播放服务。
 
 ## 开发与验证
 
@@ -66,4 +67,4 @@ Windows 下若 lint 报 `PropertyEscape`，检查本机 `android/local.propertie
 
 源码仓库：`https://github.com/Ghpt6/timer-manager.git`，主分支 `main`。不要提交 `build/`、`.dart_tool/`、本机 SDK 路径、签名文件或凭据。
 
-当前版本为 `1.1.1+4004`。后续覆盖安装递增 `pubspec.yaml` 的构建号；调试包和分 ABI 体验包共用版本号，`android/gradle.properties` 已关闭 ABI 版本偏移。release 目前使用调试签名，正式商店发布需要另行配置签名。
+当前版本为 `1.2.0+4005`。后续覆盖安装递增 `pubspec.yaml` 的构建号；调试包和分 ABI 体验包共用版本号，`android/gradle.properties` 已关闭 ABI 版本偏移。release 目前使用调试签名，正式商店发布需要另行配置签名。
