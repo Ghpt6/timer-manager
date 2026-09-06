@@ -31,12 +31,14 @@ void main() {
     tester,
   ) async {
     final controller = await launch(tester);
+    expect(find.text('不慌不忙\n刚刚好'), findsOneWidget);
     expect(find.text('05:10'), findsOneWidget);
     expect(find.text('11:40'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('preset-1')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('active-1')), findsOneWidget);
     expect(controller.runningCount, 1);
+    expect(find.text('不慌不忙\n刚刚好'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('toggle-1')));
     await tester.pump();
     expect(find.text('已暂停'), findsOneWidget);
@@ -49,6 +51,53 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('dismiss-1')));
     await tester.pumpAndSettle();
     expect(controller.timers, isEmpty);
+    expect(find.text('不慌不忙\n刚刚好'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('returning from background hides the first-visit welcome', (
+    tester,
+  ) async {
+    await launch(tester);
+    expect(find.text('不慌不忙\n刚刚好'), findsOneWidget);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.text('不慌不忙\n刚刚好'), findsNothing);
+  });
+
+  testWidgets('delete notice expires and undo works before timeout', (
+    tester,
+  ) async {
+    final controller = await launch(
+      tester,
+      size: const Size(320, 740),
+      scale: 1.3,
+    );
+    await tester.ensureVisible(find.byKey(const ValueKey('menu-1')));
+    await tester.tap(find.byKey(const ValueKey('menu-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(find.text('已删除「烧水」'), findsOneWidget);
+    expect(controller.presets.any((preset) => preset.id == 1), isFalse);
+    await tester.tap(find.text('撤销'));
+    await tester.pumpAndSettle();
+    expect(controller.presets.any((preset) => preset.id == 1), isTrue);
+    expect(find.byType(SnackBar), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('menu-2')));
+    await tester.tap(find.byKey(const ValueKey('menu-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(find.text('已删除「煮蛋」'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byType(SnackBar), findsNothing);
+    expect(controller.presets.any((preset) => preset.id == 2), isFalse);
     expect(tester.takeException(), isNull);
   });
 

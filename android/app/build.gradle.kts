@@ -35,6 +35,15 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 }
 
 kotlin {
@@ -45,4 +54,13 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Flutter copies assets after AGP's merge task. Host tests must consume that
+// completed output too (Gradle 9 validates the dependency explicitly).
+tasks.configureEach {
+    if (name.startsWith("package") && name.endsWith("UnitTestForUnitTest")) {
+        val variant = name.removePrefix("package").removeSuffix("UnitTestForUnitTest")
+        dependsOn("copyFlutterAssets$variant")
+    }
 }

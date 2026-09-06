@@ -29,8 +29,10 @@
 - 本地 JSON 当前为 **version 2**：`version`、`nextId`、`nextCategoryId`、`categories`、`presets`、`timers`。任务仍保存 `kind` 枚举名称，新增 `categoryId`。
 - version 1 必须兼容：仅迁移原有记录，根据旧 `kind` 映射日常/烹饪/饮品三个分类，然后保存为 version 2。保持任务 ID、时长、暂停剩余毫秒和 deadline；不为升级用户追加默认任务，空任务库仍为空。
 - 首次安装才使用 `defaultPresets` 和 `defaultCategories`。调整默认内容时同步检查 `_nextId`/`_nextCategoryId`；加载时也会校正它们，避免复用任务及活动快照中的 ID。
+- 首次打开即串行保存初始状态，用本地状态是否存在区分首次访问；欢迎卡片只在首次访问中显示，开始任务后隐藏。已有 version 1/2 用户不再显示欢迎卡片。
 - `kitchen_timer/platform`、SharedPreferences 的 `kitchen_timer`/`kitchen_timer_permissions`、通知 channel `kitchen_timer_finished` 是兼容性标识。不要因产品改名而直接改动，否则可能丢失已有数据或通知设置。
 - Android 从 `timers` 读取任务 ID、名称、status 和 deadline，保存状态也同步系统闹钟。暂停/重置/取消需要撤销相应闹钟，完成通知按本次 deadline 去重。
+- `TimerRingingService` 用闹钟音量播放内置铃声，每次完成最多 15 秒；多个计时共享播放器。重置/取消/完成必须停止对应 deadline 的响铃，编辑/删除任务或分类不影响活动响铃。保留用户通知静音设置；重启接收器不得直接启动媒体播放服务。
 
 ## 开发与验证
 
@@ -48,6 +50,8 @@ flutter build apk --debug
 
 修改 Android 原生代码后还应在 `android` 目录运行 `./gradlew :app:lintDebug`（Windows：`./gradlew.bat :app:lintDebug`）。Gradle wrapper / local.properties 由 Flutter 工具生成，首次克隆先执行 Flutter 构建。
 
+原生提醒回归测试运行 `./gradlew :app:testDebugUnitTest`（Windows 使用 `./gradlew.bat`），测试文件在 `android/app/src/test/kotlin/com/example/flutterproject/`。
+
 Windows 下若 lint 报 `PropertyEscape`，检查本机 `android/local.properties` 的盘符冒号和反斜线是否正确转义（例如 `D\:\\Dev\\flutter`）；该文件应继续被 Git 忽略。
 
 测试入口：
@@ -62,4 +66,4 @@ Windows 下若 lint 报 `PropertyEscape`，检查本机 `android/local.propertie
 
 源码仓库：`https://github.com/Ghpt6/timer-manager.git`，主分支 `main`。不要提交 `build/`、`.dart_tool/`、本机 SDK 路径、签名文件或凭据。
 
-当前版本为 `1.1.0+4003`。后续覆盖安装递增 `pubspec.yaml` 的构建号；调试包和分 ABI 体验包共用版本号，`android/gradle.properties` 已关闭 ABI 版本偏移。release 目前使用调试签名，正式商店发布需要另行配置签名。
+当前版本为 `1.1.1+4004`。后续覆盖安装递增 `pubspec.yaml` 的构建号；调试包和分 ABI 体验包共用版本号，`android/gradle.properties` 已关闭 ABI 版本偏移。release 目前使用调试签名，正式商店发布需要另行配置签名。

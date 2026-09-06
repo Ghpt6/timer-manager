@@ -22,6 +22,7 @@ class TimerController extends ChangeNotifier {
   int _nextId = 10;
   int _nextCategoryId = 7;
   bool loaded = false;
+  bool _showWelcome = false;
   String? error;
   String? warning;
 
@@ -32,6 +33,7 @@ class TimerController extends ChangeNotifier {
   int get runningCount =>
       _timers.where((timer) => timer.status == TimerStatus.running).length;
   Future<void> get saved => _pendingSave;
+  bool get showWelcome => _showWelcome;
 
   TimerCategory? categoryFor(int? id) {
     for (final category in _categories) {
@@ -46,9 +48,11 @@ class TimerController extends ChangeNotifier {
     if (_initializing || loaded) return;
     _initializing = true;
     var migrated = false;
+    var firstLaunch = false;
     try {
       final raw = await platform.readState();
       if (_disposed) return;
+      firstLaunch = raw == null;
       if (raw != null) {
         final state = jsonDecode(raw) as Map<String, dynamic>;
         final legacy = state['version'] == 1;
@@ -126,9 +130,12 @@ class TimerController extends ChangeNotifier {
       error = '无法读取本地记录，已显示默认计时。';
     }
     if (_disposed) return;
+    // An existing state also counts as a previous visit when upgrading. Save
+    // the first visit even if no task is started, so a relaunch stays compact.
+    _showWelcome = firstLaunch;
     loaded = true;
     refresh();
-    if (migrated) _persist();
+    if (migrated || firstLaunch) _persist();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (runningCount > 0) refresh();
     });
@@ -142,8 +149,15 @@ class TimerController extends ChangeNotifier {
     return null;
   }
 
+  void dismissWelcome() {
+    if (!_showWelcome) return;
+    _showWelcome = false;
+    notifyListeners();
+  }
+
   void start(TimerPreset preset) {
     if (!loaded) return;
+    _showWelcome = false;
     final current = timerFor(preset.id);
     if (current?.status == TimerStatus.running) return;
     if (current?.status == TimerStatus.paused) {

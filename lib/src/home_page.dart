@@ -37,6 +37,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden) {
+      widget.controller.dismissWelcome();
+    }
     if (state == AppLifecycleState.resumed) {
       widget.controller.refresh();
       widget.controller.refreshWarning();
@@ -127,10 +130,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             child: _header(controller),
                           ),
                         ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-                          sliver: SliverToBoxAdapter(child: _hero()),
-                        ),
+                        if (controller.showWelcome)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                            sliver: SliverToBoxAdapter(child: _hero()),
+                          ),
                         if (controller.error != null)
                           SliverPadding(
                             padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
@@ -594,10 +598,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _deletePreset(TimerPreset preset) {
     widget.controller.deletePreset(preset.id);
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('已删除「${preset.name}」'),
+        duration: const Duration(seconds: 4),
+        persist: false,
         action: SnackBarAction(
           label: '撤销',
           onPressed: () => widget.controller.savePreset(

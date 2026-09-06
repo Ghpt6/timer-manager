@@ -19,6 +19,36 @@ void main() {
   });
   tearDown(() => controller.dispose());
 
+  test(
+    'welcome is shown only on the first visit, even without starting',
+    () async {
+      expect(controller.showWelcome, isTrue);
+      await controller.saved;
+      controller.dispose();
+      controller = TimerController(platform: platform, now: () => now);
+      await controller.initialize();
+      expect(controller.showWelcome, isFalse);
+      expect(controller.presets.length, defaultPresets.length);
+      expect(controller.timers, isEmpty);
+    },
+  );
+
+  test(
+    'starting permanently hides welcome after reset, cancel and relaunch',
+    () async {
+      controller.start(controller.presets.first);
+      expect(controller.showWelcome, isFalse);
+      controller.reset(1);
+      controller.dismiss(1);
+      expect(controller.showWelcome, isFalse);
+      await controller.saved;
+      controller.dispose();
+      controller = TimerController(platform: platform, now: () => now);
+      await controller.initialize();
+      expect(controller.showWelcome, isFalse);
+    },
+  );
+
   test('required presets start immediately and run independently', () {
     expect(controller.presets[0].seconds, 310);
     expect(controller.presets[1].seconds, 700);
@@ -143,7 +173,7 @@ void main() {
     controller.dismiss(1);
     await controller.saved;
     expect(jsonDecode(platform.state!)['timers'], isEmpty);
-    expect(platform.saves, 5);
+    expect(platform.saves, 6);
   });
 
   test(
@@ -318,6 +348,7 @@ void main() {
     await controller.saved;
     expect(controller.error, isNull);
     expect(controller.presets.length, 6);
+    expect(controller.showWelcome, isFalse);
     expect(controller.categories.map((e) => e.name), ['日常', '烹饪', '饮品']);
     expect(controller.presets.map((e) => e.categoryId), [1, 2, 2, 3, 2, 2]);
     expect(controller.timerFor(1)!.deadline, deadline);
