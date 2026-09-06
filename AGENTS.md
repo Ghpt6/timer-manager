@@ -68,3 +68,5 @@ Windows 下若 lint 报 `PropertyEscape`，检查本机 `android/local.propertie
 源码仓库：`https://github.com/Ghpt6/timer-manager.git`，主分支 `main`。不要提交 `build/`、`.dart_tool/`、本机 SDK 路径、签名文件或凭据。
 
 当前版本为 `1.2.0+4005`。后续覆盖安装递增 `pubspec.yaml` 的构建号；调试包和分 ABI 体验包共用版本号，`android/gradle.properties` 已关闭 ABI 版本偏移。release 目前使用调试签名，正式商店发布需要另行配置签名。
+
+GitHub Actions 配置为 `.github/workflows/android.yml`：main/PR 自动检查并构建调试包；推送 `v*` 标签或在 main 手动勾选 `publish` 会测试、构建并发布 GitHub Release。发布要求 `ANDROID_DEBUG_KEYSTORE_BASE64` Secret，必须复用之前发布 APK 的调试签名，不得在 CI 中临时生成替代签名后发布。普通 CI 不使用此 Secret，其调试包不能用于覆盖旧版。版本校验脚本为 `.github/scripts/release_metadata.py`，标签与版本名一致，构建号高于所有旧版本标签；使用原生测试前先由 Flutter 构建生成未跟踪的 Gradle wrapper。详情见 README 的自动发布说明。

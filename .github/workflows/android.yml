@@ -1,0 +1,199 @@
+name: Android CI and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: '发布 pubspec.yaml 中的版本到 GitHub Release（仅 main）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Test and build Android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out source and version history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release version
+        id: version
+        env:
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+          python3 .github/scripts/release_metadata.py
+
+      - name: Check signing secret before installing the toolchain
+        if: steps.version.outputs.publish == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo '::error::Missing ANDROID_DEBUG_KEYSTORE_BASE64. See README.md for the one-time signing setup.'
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          # Matches android/gradle/gradle-daemon-jvm.properties.
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle.properties
+            android/gradle/**/*.properties
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          log-accepted-android-sdk-licenses: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Limit Gradle memory on the hosted runner
+        run: |
+          printf '\norg.gradle.jvmargs=-Xmx3G -XX:MaxMetaspaceSize=1G -XX:ReservedCodeCacheSize=256m\norg.gradle.workers.max=2\n' >> android/gradle.properties
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze Dart
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Restore the existing Android signing key
+        if: steps.version.outputs.publish == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey > /dev/null
+
+      - name: Build debug APK and generate the Gradle wrapper
+        # The wrapper scripts/JAR and local.properties are intentionally untracked.
+        run: flutter build apk --debug --no-pub
+
+      - name: Run Android lint and native reminder tests
+        working-directory: android
+        run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest
+
+      - name: Build release APKs for each ABI
+        if: steps.version.outputs.publish == 'true'
+        run: flutter build apk --release --split-per-abi --no-pub
+
+      - name: Collect APKs and checksums
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH_RELEASE: ${{ steps.version.outputs.publish }}
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-debug.apk "dist/timer-manager-${VERSION}-debug.apk"
+          if [[ "$PUBLISH_RELEASE" == 'true' ]]; then
+            for abi in armeabi-v7a arm64-v8a x86_64; do
+              cp "build/app/outputs/flutter-apk/app-${abi}-release.apk" "dist/timer-manager-${VERSION}-${abi}.apk"
+            done
+          fi
+          cd dist
+          sha256sum ./*.apk > SHA256SUMS.txt
+
+      - name: Upload downloadable build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: android-apks
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Remove the restored signing key
+        if: always() && steps.version.outputs.publish == 'true'
+        run: rm -f "$HOME/.android/debug.keystore"
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    # A tag push and a manual run for that tag must not publish concurrently.
+    concurrency:
+      group: release-${{ needs.build.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - name: Download the verified APKs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: android-apks
+          path: dist
+
+      - name: Verify artifact checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS.txt
+
+      - name: Create release and attach APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## 下载说明
+
+          - **arm64-v8a.apk**：大多数 Android 手机优先下载此版本。
+          - **armeabi-v7a.apk**：较旧的 32 位 ARM 设备。
+          - **x86_64.apk**：x86_64 设备或模拟器。
+          - **debug.apk**：调试包，体积较大。
+
+          本次 APK 共用同一版本号和原有调试签名，可覆盖安装同签名的旧版并保留数据。
+          `SHA256SUMS.txt` 提供下载文件的 SHA-256 校验值。
+          NOTES
+          tag_options=(--verify-tag)
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            tag_options=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
+            "${tag_options[@]}" --title "计时管理 $VERSION" \
+            --notes-file release-notes.md --generate-notes
